@@ -1,0 +1,12 @@
+{
+    "metamodule": false,
+    "summary": "为 XiaomiEU 等魔改 HyperOS 添加国行 NFC 钱包",
+    "sourceUrl": "https://github.com/ReiAccept/MiPay4XiaomiEU",
+    "additionalAuthors": [
+        {
+            "type": "add",
+            "name": "ReiAccept",
+            "link": "https://github.com/ReiAccept"
+        }
+    ]
+}
