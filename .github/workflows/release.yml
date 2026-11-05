@@ -7,14 +7,47 @@ on:
 
 jobs:
   build-module:
+    name: Build ${{ matrix.device }} (${{ matrix.version }})
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+
+    strategy:
+      fail-fast: true
+      matrix:
+        # 每个机型从对应 CN 完整固件包中提取组件, 产出一个模块 zip
+        # version 即提取的固件版本, 也是 Release Assets 的命名后缀
+        include:
+          - device: Xiaomi 14
+            codename: houji
+            version: OS3.0.5.0.WNCCNXM
+            rom: houji-ota_full-OS3.0.5.0.WNCCNXM-user-16.0-306ce971bf.zip
+          - device: Xiaomi 17
+            codename: pudding
+            version: OS3.0.319.0.WPCCNXM
+            rom: pudding-ota_full-OS3.0.319.0.WPCCNXM-user-16.0-95932c9372.zip
+          - device: Xiaomi 17 Pro
+            codename: pandora
+            version: OS3.0.319.0.WBLCNXM
+            rom: pandora-ota_full-OS3.0.319.0.WBLCNXM-user-16.0-2d01cf4d66.zip
+          - device: Xiaomi 17 Pro Max
+            codename: popsicle
+            version: OS3.0.319.0.WPBCNXM
+            rom: popsicle-ota_full-OS3.0.319.0.WPBCNXM-user-16.0-8219ec7790.zip
+          - device: Xiaomi 17 Ultra
+            codename: nezha
+            version: OS3.0.312.0.WPACNXM
+            rom: nezha-ota_full-OS3.0.312.0.WPACNXM-user-16.0-8e59f52054.zip
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
- 
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /opt/az || true
+          df -h
+
       - name: Setup tools
         run: |
           sudo apt-get update
@@ -24,34 +57,58 @@ jobs:
           chmod +x payload-dumper-go
 
       - name: Download HyperOS
+        env:
+          ROM_URL: https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/${{ matrix.version }}/${{ matrix.rom }}
         run: |
-          wget https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS3.0.5.0.WNCCNXM/houji-ota_full-OS3.0.5.0.WNCCNXM-user-16.0-306ce971bf.zip
-          unzip houji-ota_full-OS3.0.5.0.WNCCNXM-user-16.0-306ce971bf.zip payload.bin
-          rm houji-ota_full-OS3.0.5.0.WNCCNXM-user-16.0-306ce971bf.zip
+          wget --tries=3 --timeout=120 -O "${{ matrix.rom }}" "$ROM_URL"
+          unzip -o "${{ matrix.rom }}" payload.bin
+          rm -f "${{ matrix.rom }}"
+          df -h
 
       - name: Unpack HyperOS
         run: |
           ./payload-dumper-go -o ./ -p product ./payload.bin
-          rm payload.bin
-          mkdir product
+          rm -f payload.bin
+          mkdir -p product
           fsck.erofs product.img --extract=product
+          rm -f product.img
           df -h
-          free -h
 
       - name: Assemble module
         run: |
-          cp -a ./product/app/MINextpay ./module/system/app/MINextpay
-          cp -a ./product/app/MITSMClient ./module/system/app/MITSMClient
-          cp -a ./product/app/UPTsmService ./module/system/app/UPTsmService
-          cp -a ./product/app/MIUISuperMarket ./module/system/app/MIUISuperMarket
-          rm ./module/system/app/.gitkeep
+          for app in MINextpay MITSMClient UPTsmService MIUISuperMarket; do
+            cp -a "./product/app/$app" "./module/system/app/$app"
+          done
+          rm -f ./module/system/app/.gitkeep
 
       - name: Package module
         run: |
           cd module/
-          zip -r ../MiPay4XiaomiEU.zip *
+          zip -r "../MiPay4XiaomiEU-${{ matrix.version }}.zip" *
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiPay4XiaomiEU-${{ matrix.version }}
+          path: MiPay4XiaomiEU-${{ matrix.version }}.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build-module
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
 
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: MiPay4XiaomiEU.zip
+          files: packages/*.zip
